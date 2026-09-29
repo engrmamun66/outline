@@ -1,0 +1,52 @@
+{
+  "extends": ["../.oxlintrc.json"],
+  "ignorePatterns": ["**/*.d.ts"],
+  "plugins": ["oxc", "eslint", "typescript", "react"],
+  "overrides": [
+    {
+      "files": ["**/*.{js,jsx,ts,tsx}"],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "crypto",
+            "message": "Do not use, does not work in environments without SSL."
+          }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "~/editor",
+                "allowTypeImports": true,
+                "message": "Import AsyncEditor from ~/components/AsyncEditor instead. A direct import pulls the editor into the importing chunk and bypasses the shared preload."
+              },
+              {
+                "name": "prosemirror-tables",
+                "importNames": [
+                  "addRowBefore",
+                  "addRowAfter",
+                  "addColumnBefore",
+                  "addColumnAfter"
+                ],
+                "message": "Use the wrappers from shared/editor/commands/table instead, which respect the target index and place the cursor in the inserted cell."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["mime-types"],
+                "message": "Do not use the mime-types package in the browser."
+              }
+            ]
+          }
+        ]
+      },
+      "plugins": ["import"]
+    }
+  ],
+  "env": {
+    "jest": true,
+    "browser": true
+  }
+}

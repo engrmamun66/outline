@@ -1,0 +1,56 @@
+import * as React from "react";
+import styled from "styled-components";
+import { s } from "@shared/styles";
+import Flex from "./Flex";
+import Text from "./Text";
+
+type Props = {
+  children?: React.ReactNode;
+  icon?: React.JSX.Element;
+  description?: React.JSX.Element;
+  className?: string;
+};
+
+const Notice: React.FC<Props> = ({
+  children,
+  icon,
+  description,
+  className,
+}: Props) => (
+  <Container as="div" className={className}>
+    <Flex as="span" gap={8}>
+      {icon}
+      <span>
+        <Title>{children}</Title>
+        {description && (
+          <>
+            <br />
+            {description}
+          </>
+        )}
+      </span>
+    </Flex>
+  </Container>
+);
+
+const Title = styled.span`
+  color: ${s("textSecondary")};
+  font-weight: 500;
+  font-size: 16px;
+`;
+
+const Container = styled(Text)`
+  background: ${s("sidebarBackground")};
+  color: ${s("textTertiary")};
+  padding: 10px 12px;
+  border-radius: 4px;
+  position: relative;
+  font-size: 14px;
+  margin: 1em 0;
+
+  svg {
+    flex-shrink: 0;
+  }
+`;
+
+export default Notice;

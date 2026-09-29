@@ -1,0 +1,93 @@
+import type { ColumnSort } from "@tanstack/react-table";
+import { orderBy } from "es-toolkit/compat";
+import { useState, useRef, useCallback, useEffect } from "react";
+import type { FetchPageParams, PaginatedResponse } from "~/stores/base/Store";
+import { PAGINATION_SYMBOL } from "~/stores/base/Store";
+import useRequest from "./useRequest";
+
+const INITIAL_OFFSET = 0;
+const PAGE_SIZE = 25;
+
+type Props<T> = {
+  data: T[];
+  sort: ColumnSort;
+  reqFn: (params: FetchPageParams) => Promise<PaginatedResponse<T>>;
+  reqParams: Omit<FetchPageParams, "offset" | "limit">;
+};
+
+type Response<T> = {
+  data: T[] | undefined;
+  error: unknown;
+  loading: boolean;
+  next: (() => void) | undefined;
+};
+
+export function useTableRequest<T extends { id: string }>({
+  data,
+  sort,
+  reqFn,
+  reqParams,
+}: Props<T>): Response<T> {
+  const [hasNext, setHasNext] = useState(false);
+  const [offset, setOffset] = useState({ value: INITIAL_OFFSET });
+  const prevParamsRef = useRef(reqParams);
+  const sortRef = useRef<ColumnSort>(sort);
+
+  const fetchPage = useCallback(
+    () => reqFn({ ...reqParams, offset: offset.value, limit: PAGE_SIZE }),
+    [reqFn, reqParams, offset]
+  );
+
+  const { request, loading, error } = useRequest(fetchPage);
+
+  const nextPage = useCallback(
+    () =>
+      setOffset((prev) => ({
+        value: prev.value + PAGE_SIZE,
+      })),
+    []
+  );
+
+  const sortedData = data
+    ? orderBy(data, sortRef.current.id, sortRef.current.desc ? "desc" : "asc")
+    : undefined;
+
+  const next = !loading && hasNext ? nextPage : undefined;
+
+  useEffect(() => {
+    if (prevParamsRef.current !== reqParams) {
+      prevParamsRef.current = reqParams;
+      setHasNext(false);
+      setOffset({ value: INITIAL_OFFSET });
+      return;
+    }
+
+    let ignore = false;
+
+    const handleRequest = async () => {
+      const response = await request();
+      if (!response || ignore) {
+        return;
+      }
+
+      sortRef.current = sort; // Change sort once we receive a response from server - avoids flicker with stale data.
+      const pagination = response[PAGINATION_SYMBOL];
+      setHasNext(
+        !!pagination && pagination.offset + response.length < pagination.total
+      );
+    };
+
+    void handleRequest();
+
+    return () => {
+      ignore = true;
+    };
+  }, [sort, reqParams, offset, request]);
+
+  return {
+    data: sortedData,
+    error,
+    loading,
+    next,
+  };
+}

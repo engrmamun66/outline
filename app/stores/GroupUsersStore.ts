@@ -1,0 +1,112 @@
+import invariant from "invariant";
+import { action, makeObservable, override, runInAction } from "mobx";
+import GroupUser from "~/models/GroupUser";
+import type { PaginationParams } from "~/types";
+import { GroupPermission } from "@shared/types";
+import { client } from "~/utils/ApiClient";
+import type RootStore from "./RootStore";
+import Store, { type PaginatedResponse, RPCAction } from "./base/Store";
+
+export default class GroupUsersStore extends Store<GroupUser> {
+  actions = [RPCAction.Create, RPCAction.Update, RPCAction.Delete];
+
+  responseKey = "groupMemberships";
+
+  constructor(rootStore: RootStore) {
+    super(rootStore, GroupUser);
+    makeObservable(this);
+  }
+
+  fetchPage = async (
+    params: PaginationParams | undefined
+  ): Promise<PaginatedResponse<GroupUser>> =>
+    this.fetchPaginated("/groups.memberships", params, [this.rootStore.users]);
+
+  @override
+  async create({
+    groupId,
+    userId,
+    permission = GroupPermission.Member,
+  }: {
+    groupId: string;
+    userId: string;
+    permission?: GroupPermission;
+  }) {
+    const res = await client.post("/groups.add_user", {
+      id: groupId,
+      userId,
+      permission,
+    });
+    invariant(res?.data, "Group Membership data should be available");
+
+    return runInAction(() => {
+      res.data.users.forEach(this.rootStore.users.add);
+      res.data.groups.forEach(this.rootStore.groups.add);
+
+      const groupMemberships = res.data.groupMemberships.map(this.add);
+      return groupMemberships[0];
+    });
+  }
+
+  @override
+  async delete({ groupId, userId }: { groupId: string; userId: string }) {
+    const res = await client.post("/groups.remove_user", {
+      id: groupId,
+      userId,
+    });
+    invariant(res?.data, "Group Membership data should be available");
+    this.remove(`${userId}-${groupId}`);
+    runInAction(() => {
+      res.data.groups.forEach(this.rootStore.groups.add);
+      this.isLoaded = true;
+    });
+  }
+
+  @override
+  async update({
+    groupId,
+    userId,
+    permission,
+  }: {
+    groupId: string;
+    userId: string;
+    permission?: GroupPermission;
+  }) {
+    const res = await client.post("/groups.update_user", {
+      id: groupId,
+      userId,
+      permission,
+    });
+    invariant(res?.data, "Group Membership data should be available");
+
+    return runInAction(() => {
+      res.data.users.forEach(this.rootStore.users.add);
+      res.data.groups.forEach(this.rootStore.groups.add);
+
+      const groupMemberships = res.data.groupMemberships.map(this.add);
+      return groupMemberships[0];
+    });
+  }
+
+  @action
+  removeGroupMemberships = (groupId: string) => {
+    this.data.forEach((_, key) => {
+      if (key.includes(groupId)) {
+        this.remove(key);
+      }
+    });
+  };
+
+  inGroup = (groupId: string) =>
+    this.orderedData.filter((member) => member.groupId === groupId);
+
+  /**
+   * Returns the membership of a user in a group, if loaded.
+   *
+   * @param groupId - the identifier of the group.
+   * @param userId - the identifier of the user.
+   * @returns the membership, if present in the store.
+   */
+  membership = (groupId: string, userId: string) =>
+    this.get(`${userId}-${groupId}`);
+}

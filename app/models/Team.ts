@@ -1,0 +1,172 @@
+import { computed, observable } from "mobx";
+import { TeamPreferenceDefaults } from "@shared/constants";
+import { CommentingAccess, TeamPreference } from "@shared/types";
+import type {
+  Plan,
+  PlanFeature,
+  TeamPreferences,
+  UserRole,
+} from "@shared/types";
+import { stringToColor } from "@shared/utils/color";
+import Model from "./base/Model";
+import Field from "./decorators/Field";
+
+class Team extends Model {
+  static modelName = "Team";
+
+  constructor(fields: Record<string, unknown>, store: Model["store"]) {
+    super(fields, store);
+    this.initialize(fields);
+  }
+
+  @Field
+  @observable
+  name: string;
+
+  @Field
+  @observable
+  description: string | null;
+
+  @Field
+  @observable
+  avatarUrl: string;
+
+  @Field
+  @observable
+  sharing: boolean;
+
+  @Field
+  @observable
+  inviteRequired: boolean;
+
+  @Field
+  @observable
+  commenting: boolean;
+
+  @Field
+  @observable
+  documentEmbeds: boolean;
+
+  @Field
+  @observable
+  defaultCollectionId: string | null;
+
+  @Field
+  @observable
+  memberCollectionCreate: boolean;
+
+  @Field
+  @observable
+  memberTeamCreate: boolean;
+
+  @Field
+  @observable
+  guestSignin: boolean;
+
+  @Field
+  @observable
+  passkeysEnabled: boolean;
+
+  @Field
+  @observable
+  subdomain: string | null | undefined = undefined;
+
+  @Field
+  @observable
+  defaultUserRole: UserRole;
+
+  @Field
+  @observable
+  guidanceMCP: string | null;
+
+  @Field
+  @observable
+  preferences: TeamPreferences | null;
+
+  @observable
+  domain: string | null | undefined = undefined;
+
+  @observable
+  url: string;
+
+  @Field
+  @observable
+  allowedDomains: string[] | null | undefined = undefined;
+
+  @observable
+  plan: Plan;
+
+  @observable
+  entitlements: PlanFeature[];
+
+  @computed
+  get signinMethods(): string {
+    return "SSO";
+  }
+
+  @computed
+  get color(): string {
+    return stringToColor(this.id);
+  }
+
+  @computed
+  get initial(): string {
+    return (this.name ? this.name[0] : "?").toUpperCase();
+  }
+
+  /**
+   * Whether commenting is enabled for the team, for either members or
+   * members and guests.
+   *
+   * @returns true if commenting is enabled, false otherwise.
+   */
+  @computed
+  get commentingEnabled(): boolean {
+    const access = this.getPreference(TeamPreference.Commenting);
+    // A legacy boolean `false` (team not yet migrated) means disabled.
+    return access !== CommentingAccess.None && access !== false;
+  }
+
+  /**
+   * Whether the team is entitled to use the given feature.
+   *
+   * @param feature The feature to check for.
+   * @returns true if the team is entitled to the feature, false otherwise.
+   */
+  hasEntitlement(feature: PlanFeature): boolean {
+    return !!this.entitlements?.includes(feature);
+  }
+
+  /**
+   * Returns the value of the provided preference.
+   *
+   * @param preference The team preference to retrieve
+   * @returns The preference value if set, else the default value
+   */
+  getPreference<T extends keyof TeamPreferences>(
+    key: T,
+    defaultValue?: TeamPreferences[T]
+  ): TeamPreferences[T] | false {
+    return (
+      this.preferences?.[key] ??
+      TeamPreferenceDefaults[key] ??
+      defaultValue ??
+      false
+    );
+  }
+
+  /**
+   * Set the value for a specific preference key.
+   *
+   * @param key The TeamPreference key to set.
+   * @param value The value to set.
+   */
+  setPreference<T extends TeamPreference>(key: T, value: TeamPreferences[T]) {
+    this.preferences = {
+      ...this.preferences,
+      [key]: value,
+    };
+  }
+}
+
+export default Team;

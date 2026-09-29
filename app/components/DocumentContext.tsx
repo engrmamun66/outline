@@ -1,0 +1,164 @@
+import { action, computed, makeObservable, observable } from "mobx";
+import type { PropsWithChildren } from "react";
+import { createContext, useContext, useMemo } from "react";
+import type { Node } from "prosemirror-model";
+import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
+import type { Heading } from "@shared/utils/ProsemirrorHelper";
+import type { TextStats } from "~/hooks/useTextStats";
+import { getTextStats } from "~/hooks/useTextStats";
+import type Document from "~/models/Document";
+import type { Editor } from "~/editor";
+import type { ConnectionStatus } from "~/utils/multiplayer/CollaborationProvider";
+
+class DocumentContext {
+  /** The current document */
+  document?: Document;
+
+  /** The editor instance for this document */
+  @observable.ref
+  editor: Editor | undefined = undefined;
+
+  /** The total number of changes in the currently viewed revision diff */
+  @observable
+  totalChanges: number = 0;
+
+  /** The ID of the currently focused comment, or null if no comment is focused */
+  @observable
+  focusedCommentId: string | null = null;
+
+  /** Whether the editor has been initialized */
+  @observable
+  isEditorInitialized: boolean = false;
+
+  /** The headings in the document */
+  @observable
+  headings: Heading[] = [];
+
+  /** The connection status of the collaboration provider */
+  @observable
+  multiplayerStatus: ConnectionStatus | undefined = undefined;
+
+  /** The close code of the collaboration connection, when it was closed with an error */
+  @observable
+  multiplayerErrorCode?: number = undefined;
+
+  /** Whether there are local edits the collaboration server has not confirmed */
+  @observable
+  hasUnsyncedChanges = false;
+
+  /** Whether edits are also stored in the browser, so they survive a reload */
+  @observable
+  hasLocalPersistence = true;
+
+  constructor() {
+    makeObservable(this);
+  }
+
+  @computed
+  get hasHeadings() {
+    // Headings inside tables are not listed in the table of contents.
+    return this.headings.some((heading) => !heading.inTable);
+  }
+
+  /** Statistics for the text content of the document, kept up to date as it is edited */
+  @computed
+  get stats(): TextStats {
+    return getTextStats(
+      this.editorDoc ? ProsemirrorHelper.toPlainText(this.editorDoc) : ""
+    );
+  }
+
+  @action
+  setDocument = (document: Document) => {
+    // Reset the focused comment when navigating between documents
+    if (this.document && this.document.id !== document.id) {
+      this.focusedCommentId = null;
+    }
+    this.document = document;
+    this.updateState();
+  };
+
+  @action
+  setEditor = (editor: Editor) => {
+    this.editor = editor;
+    this.updateState();
+  };
+
+  @action
+  setEditorInitialized = (initialized: boolean) => {
+    this.isEditorInitialized = initialized;
+  };
+
+  @action
+  setTotalChanges = (totalChanges: number) => {
+    this.totalChanges = totalChanges;
+  };
+
+  @action
+  setFocusedCommentId = (commentId: string | null) => {
+    this.focusedCommentId = commentId;
+  };
+
+  @action
+  setMultiplayerStatus = (status: ConnectionStatus, errorCode?: number) => {
+    this.multiplayerStatus = status;
+    this.multiplayerErrorCode = errorCode;
+  };
+
+  @action
+  setMultiplayerSyncState = (
+    hasUnsyncedChanges: boolean,
+    hasLocalPersistence: boolean
+  ) => {
+    this.hasUnsyncedChanges = hasUnsyncedChanges;
+    this.hasLocalPersistence = hasLocalPersistence;
+  };
+
+  @action
+  updateState = () => {
+    this.editorDoc = this.editor?.view.state.doc;
+    this.updateHeadings();
+    this.updateTasks();
+  };
+
+  /** The ProseMirror document currently held by the editor */
+  @observable.ref
+  private editorDoc: Node | undefined = undefined;
+
+  private updateHeadings() {
+    const currHeadings = this.editor?.getHeadings() ?? [];
+    const hasChanged =
+      currHeadings.map((h) => h.level + h.title).join("") !==
+      this.headings.map((h) => h.level + h.title).join("");
+
+    if (hasChanged) {
+      this.headings = currHeadings;
+    }
+  }
+
+  private updateTasks() {
+    const tasks = this.editor?.getTasks() ?? [];
+    const total = tasks.length ?? 0;
+    const completed = tasks.filter((t) => t.completed).length ?? 0;
+    this.document?.updateTasks(total, completed);
+  }
+}
+
+const Context = createContext<DocumentContext | null>(null);
+
+export const useDocumentContext = () => {
+  const ctx = useContext(Context);
+  if (!ctx) {
+    throw new Error(
+      "useDocumentContext must be used within DocumentContextProvider"
+    );
+  }
+  return ctx;
+};
+
+export const DocumentContextProvider = ({
+  children,
+}: PropsWithChildren<unknown>) => {
+  const context = useMemo(() => new DocumentContext(), []);
+  return <Context.Provider value={context}>{children}</Context.Provider>;
+};

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="{lang}">
+  <head>
+    <title>{title}</title>
+    <meta
+      name="theme-color"
+      content="#FFF"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#111319"
+      media="(prefers-color-scheme: dark)"
+    />
+    <script nonce="{csp-nonce}">
+      (function () {
+        var theme = "system";
+        var storedTheme;
+
+        try {
+          storedTheme = window.localStorage.getItem("theme");
+          theme = storedTheme ? JSON.parse(storedTheme) : theme;
+        } catch (_err) {
+          // Older versions stored the value without JSON encoding.
+          theme = storedTheme || theme;
+        }
+
+        var isDark =
+          theme === "dark" ||
+          (theme !== "light" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var color = isDark ? "#111319" : "#FFF";
+
+        document
+          .querySelectorAll('meta[name="theme-color"]')
+          .forEach(function (element) {
+            element.setAttribute("content", color);
+          });
+      })();
+    </script>
+    <meta name="slack-app-id" content="{slack-app-id}" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="{description}" />
+    <meta name="darkreader-lock" />
+    {head-tags}
+    <style>
+      @font-face {
+        font-family: "Inter";
+        font-display: swap;
+        font-feature-settings: "ss03", "cv05";
+        src: url("{cdn-url}/fonts/Inter.var.woff2") format("woff2");
+      }
+
+      @font-face {
+        font-family: "Inter";
+        font-display: swap;
+        font-feature-settings: "ss03", "cv05";
+        font-style: italic;
+        src: url("{cdn-url}/fonts/Inter-italic.var.woff2") format("woff2");
+      }
+
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        display: flex;
+        width: 100%;
+        height: 100%;
+      }
+
+      @media print {
+        body {
+          display: block;
+        }
+      }
+
+      #root {
+        flex: 1;
+        min-height: 100%;
+        width: 100%;
+      }
+
+      .screenreader-only {
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        height: 1px;
+        overflow: hidden;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
+      }
+
+      @media print {
+        .screenreader-only {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    {env}
+    <script nonce="{csp-nonce}">
+      document.querySelector("#root").style.background = document
+        .querySelector('meta[name="theme-color"]')
+        .getAttribute("content");
+    </script>
+    {script-tags}
+    <div class="screenreader-only">{content}</div>
+  </body>
+</html>

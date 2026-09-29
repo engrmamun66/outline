@@ -1,0 +1,268 @@
+import { difference } from "es-toolkit/compat";
+import { observer } from "mobx-react";
+import * as React from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { mergeRefs } from "react-merge-refs";
+import type { Optional } from "utility-types";
+import EditorContainer from "@shared/editor/components/Styles";
+import { AttachmentPreset } from "@shared/types";
+import { ProsemirrorHelper } from "~/models/helpers/ProsemirrorHelper";
+import AsyncEditor from "~/components/AsyncEditor";
+import ClickablePadding from "~/components/ClickablePadding";
+import ErrorBoundary from "~/components/ErrorBoundary";
+import PlaceholderDocument from "~/components/PlaceholderDocument";
+import type { Props as EditorProps, Editor as SharedEditor } from "~/editor";
+import useCurrentUser from "~/hooks/useCurrentUser";
+import useEditorClickHandlers from "~/hooks/useEditorClickHandlers";
+import useEmbeds from "~/hooks/useEmbeds";
+import useStores from "~/hooks/useStores";
+import { uploadFile, uploadFileFromUrl } from "~/utils/files";
+import useShare from "@shared/hooks/useShare";
+
+export type Props = Optional<
+  EditorProps,
+  "placeholder" | "defaultValue" | "onClickLink" | "embeds" | "extensions"
+> & {
+  embedsDisabled?: boolean;
+  onSynced?: () => Promise<void>;
+  onPublish?: (event: React.MouseEvent) => void;
+  editorStyle?: React.CSSProperties;
+};
+
+function Editor({ ref, ...props }: Props & { ref?: React.Ref<SharedEditor> }) {
+  const {
+    id,
+    onChange,
+    onCreateCommentMark,
+    onDeleteCommentMark,
+    onFileUploadStart,
+    onFileUploadStop,
+  } = props;
+  const { comments } = useStores();
+  const { shareId } = useShare();
+  const { t } = useTranslation();
+  const embeds = useEmbeds(!shareId);
+  const localRef = React.useRef<SharedEditor | null>(null);
+  const preferences = useCurrentUser({ rejectOnEmpty: false })?.preferences;
+  const previousCommentIds = React.useRef<string[] | undefined>(undefined);
+
+  // Upload progress tracking for delayed toast
+  const progressMap = React.useMemo(() => new Map<string, number>(), []);
+  const uploadState = React.useRef<{
+    toastId?: string | number;
+    timeoutId?: ReturnType<typeof setTimeout>;
+    progress: Map<string, number>;
+  }>({ progress: progressMap });
+
+  const handleUploadFile = React.useCallback(
+    async (
+      file: File | string,
+      uploadOptions?: {
+        id?: string;
+        onProgress?: (fractionComplete: number) => void;
+      }
+    ) => {
+      const options = {
+        id: uploadOptions?.id,
+        documentId: id,
+        preset: AttachmentPreset.DocumentAttachment,
+        onProgress: uploadOptions?.onProgress,
+      };
+      const result =
+        file instanceof File
+          ? await uploadFile(file, options)
+          : await uploadFileFromUrl(file, options);
+      return result.url;
+    },
+    [id]
+  );
+
+  const { handleClickLink } = useEditorClickHandlers({ shareId });
+
+  // Show toast only after uploads have been running for 2 seconds
+  const handleFileUploadStart = React.useCallback(() => {
+    uploadState.current.timeoutId = setTimeout(() => {
+      uploadState.current.toastId = toast.loading(
+        t("Uploading… {{ progress }}%", { progress: 0 })
+      );
+    }, 2000);
+    onFileUploadStart?.();
+  }, [onFileUploadStart, t]);
+
+  const handleFileUploadProgress = React.useCallback(
+    (fileId: string, fractionComplete: number) => {
+      uploadState.current.progress.set(fileId, fractionComplete);
+
+      // Calculate average progress across all files
+      const progressValues = Array.from(uploadState.current.progress.values());
+      const avgProgress =
+        progressValues.reduce((a, b) => a + b, 0) / progressValues.length;
+      const percent = Math.round(avgProgress * 100);
+
+      // Update toast if visible
+      if (uploadState.current.toastId) {
+        toast.loading(t("Uploading… {{ progress }}%", { progress: percent }), {
+          id: uploadState.current.toastId,
+        });
+      }
+    },
+    [t]
+  );
+
+  const handleFileUploadStop = React.useCallback(() => {
+    if (uploadState.current.timeoutId) {
+      clearTimeout(uploadState.current.timeoutId);
+      uploadState.current.timeoutId = undefined;
+    }
+    if (uploadState.current.toastId) {
+      toast.dismiss(uploadState.current.toastId);
+      uploadState.current.toastId = undefined;
+    }
+    uploadState.current.progress.clear();
+    onFileUploadStop?.();
+  }, [onFileUploadStop]);
+
+  const focusAtEnd = React.useCallback(() => {
+    localRef?.current?.focusAtEnd();
+  }, [localRef]);
+
+  const handleDrop = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) =>
+      localRef.current?.insertDroppedContent(event),
+    []
+  );
+
+  // see: https://stackoverflow.com/a/50233827/192065
+  const handleDragOver = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.stopPropagation();
+      event.preventDefault();
+    },
+    []
+  );
+
+  const updateComments = React.useCallback(
+    (event?: { remote: boolean }) => {
+      if (onCreateCommentMark && onDeleteCommentMark && localRef.current) {
+        const commentMarks = localRef.current.getComments();
+        const commentIds = comments.orderedData.map((c) => c.id);
+        const commentMarkIds = commentMarks?.map((c) => c.id);
+
+        // Only marks created by a local change should steal focus. Marks that
+        // arrive through a remote or sync transaction, or that are discovered
+        // by a rescan outside of a change event – such as the initial load of
+        // a document containing a draft comment – should not.
+        const focus =
+          previousCommentIds.current !== undefined && !!event && !event.remote;
+        const newCommentIds = difference(
+          commentMarkIds,
+          previousCommentIds.current ?? [],
+          commentIds
+        );
+
+        newCommentIds.forEach((commentId) => {
+          const mark = commentMarks.find((c) => c.id === commentId);
+          if (mark) {
+            onCreateCommentMark(mark.id, mark.userId, { focus });
+          }
+        });
+
+        const removedCommentIds = difference(
+          previousCommentIds.current ?? [],
+          commentMarkIds ?? []
+        );
+
+        removedCommentIds.forEach((commentId) => {
+          onDeleteCommentMark(commentId);
+        });
+
+        previousCommentIds.current = commentMarkIds;
+      }
+    },
+    [onCreateCommentMark, onDeleteCommentMark, comments.orderedData]
+  );
+
+  const handleChange = React.useCallback<NonNullable<EditorProps["onChange"]>>(
+    (value, event) => {
+      onChange?.(value, event);
+      updateComments(event);
+    },
+    [onChange, updateComments]
+  );
+
+  const handleRefChanged = React.useCallback(
+    (node: SharedEditor | null) => {
+      if (node) {
+        updateComments();
+      }
+    },
+    [updateComments]
+  );
+
+  // Read-only content that needs no node views or plugins is rendered from
+  // the schema alone, avoiding an editor view per instance.
+  const staticHTML = React.useMemo(() => {
+    if (props.readOnly && typeof props.value === "object") {
+      const node = ProsemirrorHelper.toStaticNode(props.value);
+      return node ? ProsemirrorHelper.toHTML(node) : undefined;
+    }
+    return undefined;
+  }, [props.readOnly, props.value]);
+
+  return (
+    <ErrorBoundary component="div" reloadOnChunkMissing>
+      <>
+        {staticHTML !== undefined ? (
+          <EditorContainer
+            $rtl={props.dir === "rtl"}
+            grow={props.grow}
+            style={props.style}
+            className={props.className}
+            editorStyle={props.editorStyle}
+            commenting={!!props.onClickCommentMark}
+            lang={props.lang}
+            readOnly
+          >
+            <div
+              className="ProseMirror"
+              dangerouslySetInnerHTML={{ __html: staticHTML }}
+            />
+          </EditorContainer>
+        ) : (
+          // The boundary must live between the lazy editor and any ancestor
+          // with effects or refs. If the suspension reached an outer boundary
+          // React 18 would hide mounted ancestors and destroy their effects,
+          // re-running provider setup and ref callbacks in a loop.
+          <React.Suspense fallback={<PlaceholderDocument delay={500} />}>
+            <AsyncEditor
+              key={props.extensions?.length || 0}
+              ref={mergeRefs([ref, localRef, handleRefChanged])}
+              uploadFile={handleUploadFile}
+              embeds={embeds}
+              userPreferences={preferences}
+              {...props}
+              onClickLink={handleClickLink}
+              onChange={handleChange}
+              onFileUploadStart={handleFileUploadStart}
+              onFileUploadStop={handleFileUploadStop}
+              onFileUploadProgress={handleFileUploadProgress}
+              placeholder={props.placeholder || ""}
+              defaultValue={props.defaultValue || ""}
+            />
+          </React.Suspense>
+        )}
+        {props.editorStyle?.paddingBottom && !props.readOnly && (
+          <ClickablePadding
+            onClick={props.readOnly ? undefined : focusAtEnd}
+            onDrop={props.readOnly ? undefined : handleDrop}
+            onDragOver={props.readOnly ? undefined : handleDragOver}
+            minHeight={props.editorStyle.paddingBottom}
+          />
+        )}
+      </>
+    </ErrorBoundary>
+  );
+}
+
+export default observer(Editor);
