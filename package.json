@@ -144,7 +144,7 @@
     "franc": "^6.2.0",
     "fs-extra": "^11.3.6",
     "fuse.js": "^7.5.0",
-    "fuzzy-search": "^3.2.1",
+    "fuzzy-search": "^3.3.0",
     "glob": "^11.1.0",
     "hot-shots": "^12.1.0",
     "http-errors": "2.0.1",
